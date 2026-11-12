@@ -1,0 +1,10 @@
+.DS_Store
+# Your stream keys, activity log and settings: never commit these.
+data/
+RTMPControl/.build/
+RTMPControl/build/
+RTMPControl/dist/
+RTMPControl/.swiftpm/
+*.xcodeproj/
+xcuserdata/
+__pycache__/

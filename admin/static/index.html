@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream Control</title>
+<style>
+  :root {
+    --bg: #f4f3ef; --panel: #ffffff; --panel-2: #f9f8f5; --fg: #1b1b19; --muted: #6d6c66; --faint: #a3a29b;
+    --line: #e3e1da; --accent: #2b59c3; --accent-fg: #fff;
+    --live: #1d8a4e; --live-bg: #e3f4ea; --warn: #b26a00; --warn-bg: #fdf0db; --bad: #b8312a; --bad-bg: #fbe6e4;
+    --idle: #8f8e87; --idle-bg: #eeede8;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121211; --panel: #1c1c1a; --panel-2: #222220; --fg: #ecebe7; --muted: #a09f98; --faint: #6c6b65;
+      --line: #2f2f2c; --accent: #7d9ef0; --accent-fg: #0d1426;
+      --live: #4fc985; --live-bg: #183324; --warn: #f0ae4a; --warn-bg: #3a2a10; --bad: #f08a82; --bad-bg: #3d1a17;
+      --idle: #8a8983; --idle-bg: #2a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  button, input { font: inherit; color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); font-size: 13px; }
+  .muted { color: var(--muted); }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 20px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill.live { color: var(--live); background: var(--live-bg); }
+  .pill.bad { color: var(--bad); background: var(--bad-bg); }
+  .pill.warn { color: var(--warn); background: var(--warn-bg); }
+  .pill.idle { color: var(--idle); background: var(--idle-bg); }
+  .pill.live.pulse::before { animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .stats { display: flex; gap: 20px; flex-wrap: wrap; margin-left: auto; color: var(--muted); font-size: 13px; }
+  .stats b { color: var(--fg); font-weight: 600; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .stats { margin-left: 0; } }
+
+  .btn { border: 1px solid var(--line); background: var(--panel-2); padding: 6px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--faint); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  .btn.danger { color: var(--bad); }
+  .btn.danger:hover { border-color: var(--bad); }
+  .btn.sm { padding: 3px 9px; font-size: 12.5px; }
+  input[type=text] { border: 1px solid var(--line); background: var(--panel-2); padding: 7px 10px; border-radius: 8px; min-width: 0; }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  /* stream cards */
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--panel-2); }
+  .card.live { border-color: color-mix(in srgb, var(--live) 45%, var(--line)); }
+  .card-top { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+  .card .who { font-weight: 600; font-size: 15px; }
+  .card .key { color: var(--muted); font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  .bigrate { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; margin: 10px 0 2px; }
+  .bigrate small { font-size: 13px; color: var(--muted); font-weight: 500; }
+  svg.spark { width: 100%; height: 44px; display: block; margin: 6px 0 10px; }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
+  .facts dt { color: var(--muted); } .facts dd { margin: 0; }
+  .empty { color: var(--muted); padding: 22px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+
+  /* keys table */
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.actions .btn { margin-left: 4px; }
+  tr.off td:not(.actions) { opacity: .55; }
+  .copy { cursor: pointer; border-bottom: 1px dashed var(--faint); }
+  .copy:hover { color: var(--accent); }
+
+  /* activity */
+  .events { list-style: none; margin: 0; padding: 0; max-height: 640px; overflow-y: auto; }
+  .events li { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; align-items: baseline; }
+  .events li:last-child { border-bottom: 0; }
+  .events .d { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); transform: translateY(-1px); }
+  .events .d.live { background: var(--live); } .events .d.bad { background: var(--bad); } .events .d.warn { background: var(--warn); } .events .d.info { background: var(--accent); }
+  .events time { color: var(--faint); font-size: 12px; white-space: nowrap; }
+  .x { color: var(--muted); font-size: 12px; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: var(--fg); color: var(--bg); padding: 9px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: .2s; pointer-events: none; z-index: 10; max-width: calc(100% - 32px); }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .banner { background: var(--bad-bg); color: var(--bad); padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; display: none; font-weight: 500; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Stream Control</h1>
+    <span id="srv" class="pill idle">Connecting…</span>
+    <div class="stats">
+      <span>Uptime <b id="uptime" class="num">—</b></span>
+      <span>Live <b id="nlive" class="num">0</b></span>
+      <span>In <b id="bwin" class="num">—</b></span>
+      <span>Out <b id="bwout" class="num">—</b></span>
+    </div>
+  </header>
+
+  <div id="offline" class="banner">Can't reach the RTMP server. Is the <span class="mono">rtmp</span> container running?</div>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px">
+      <h2 style="margin:0">Live now</h2>
+      <button class="btn danger sm" id="kickall" hidden>Kick all</button>
+    </div>
+    <div id="streams" class="grid"></div>
+  </section>
+
+  <div class="layout">
+    <section class="panel">
+      <h2>Stream keys</h2>
+      <form id="addform" class="row" style="margin-bottom:14px">
+        <input type="text" id="label" placeholder="Performer name" style="flex:2 1 160px" autocomplete="off" required>
+        <input type="text" id="custom" placeholder="Custom key (optional)" style="flex:1 1 140px" autocomplete="off">
+        <button class="btn primary" type="submit">Add key</button>
+      </form>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Performer</th><th>Key</th><th>Status</th><th>Last used</th><th></th></tr></thead>
+          <tbody id="keys"></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:16px; padding-top:14px; border-top:1px solid var(--line)">
+        <span class="muted" style="font-size:13px">Server URL for performers</span>
+        <input type="text" id="serverurl" class="mono" style="flex:1 1 260px">
+        <button class="btn sm" id="saveurl">Save</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Activity</h2>
+      <ul id="events" class="events"></ul>
+    </section>
+  </div>
+</main>
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const hist = {};          // stream name -> recent bitrate samples (Mbps)
+const HIST = 90;             // 90 samples x 2 s = 3 min
+let keys = [], status = { streams: [] }, settings = {};
+
+async function api(path, body) {
+  const opt = body ? { method: "POST", headers: { "Content-Type": "application/json", "X-Admin": "1" }, body: JSON.stringify(body) } : {};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2200); }
+async function copy(text, msg) { try { await navigator.clipboard.writeText(text); toast(msg || "Copied"); } catch { prompt("Copy this:", text); } }
+
+const mbps = bps => (bps / 1e6).toFixed(2) + " Mbps";
+function dur(ms) {
+  let s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); s %= 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
+function ago(t) {
+  if (!t) return "never";
+  const s = Date.now() / 1000 - t;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return new Date(t * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+const clock = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function health(name, live) {
+  if (!live) return ["idle", "Waiting"];
+  const h = (hist[name] || []).slice(-10);
+  if (h.length < 4) return ["live pulse", "Live"];
+  const avg = h.reduce((a, b) => a + b, 0) / h.length, min = Math.min(...h);
+  if (avg < 0.05) return ["bad", "No data"];
+  if (min < avg * 0.4) return ["warn", "Unstable"];
+  return ["live pulse", "Live"];
+}
+
+function spark(name) {
+  const h = hist[name] || [];
+  if (h.length < 2) return `<svg class="spark"></svg>`;
+  const W = 300, H = 44, max = Math.max(...h, 0.5) * 1.15;
+  const x = i => (i / (HIST - 1)) * W, y = v => H - (v / max) * H;
+  const off = HIST - h.length;
+  const pts = h.map((v, i) => `${x(i + off).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${x(off)},${H} ${pts} ${x(off + h.length - 1)},${H}`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Bitrate, last 3 minutes">
+    <polygon points="${area}" fill="var(--live)" opacity=".12"/>
+    <polyline points="${pts}" fill="none" stroke="var(--live)" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function renderStatus() {
+  const s = status;
+  $("#offline").style.display = s.online ? "none" : "block";
+  const srv = $("#srv");
+  srv.className = "pill " + (s.online ? "live" : "bad");
+  srv.textContent = s.online ? "Server online" : "Server offline";
+  $("#uptime").textContent = s.online ? dur(s.uptime * 1000) : "—";
+  $("#bwin").textContent = s.online ? mbps(s.bw_in) : "—";
+  $("#bwout").textContent = s.online ? mbps(s.bw_out) : "—";
+  const streams = (s.streams || []).slice().sort((a, b) => b.live - a.live || a.name.localeCompare(b.name));
+  $("#nlive").textContent = streams.filter(x => x.live).length;
+  $("#kickall").hidden = streams.filter(x => x.live).length < 2;
+
+  $("#streams").innerHTML = streams.length ? streams.map(st => {
+    const [cls, label] = health(st.name, st.live);
+    const video = st.width ? `${st.width}×${st.height}${st.fps ? " @ " + Math.round(st.fps) : ""}${st.vcodec ? " · " + esc(st.vcodec) : ""}` : "—";
+    const audio = st.acodec ? `${esc(st.acodec)}${st.sample_rate ? " · " + (st.sample_rate / 1000) + " kHz" : ""}${st.channels ? " · " + (st.channels == 2 ? "stereo" : st.channels == 1 ? "mono" : st.channels + " ch") : ""}` : "—";
+    return `<div class="card ${st.live ? "live" : ""}">
+      <div class="card-top">
+        <div><div class="who">${esc(st.label || (st.known ? st.name : "Unknown key"))}</div><div class="key">${esc(st.name)}</div></div>
+        <span class="pill ${cls}">${label}</span>
+      </div>
+      ${st.live ? `<div class="bigrate num">${(st.bw_in / 1e6).toFixed(2)} <small>Mbps in</small></div>${spark(st.name)}` : `<p class="muted" style="margin:12px 0">OBS is connected and waiting for this performer to start.</p>`}
+      <dl class="facts">
+        ${st.live ? `<dt>Live for</dt><dd class="num">${dur(st.time_ms)}</dd>
+        <dt>Video</dt><dd>${video}</dd><dt>Audio</dt><dd>${audio}</dd>
+        <dt>Encoder</dt><dd>${esc(st.encoder || "—")}</dd>` : ""}
+        <dt>Viewers</dt><dd class="num">${st.viewers}${st.viewers ? " (OBS)" : ""}</dd>
+      </dl>
+      ${st.live ? `<div class="row" style="margin-top:12px"><button class="btn danger sm" data-kick="${esc(st.name)}">Kick</button></div>` : ""}
+    </div>`;
+  }).join("") : `<div class="empty">Nobody is streaming right now.</div>`;
+  renderKeys();
+}
+
+function renderKeys() {
+  const liveSet = new Set((status.streams || []).filter(s => s.live).map(s => s.name));
+  $("#keys").innerHTML = keys.length ? keys.slice().reverse().map(k => {
+    const st = !k.enabled ? `<span class="pill idle">Disabled</span>` : liveSet.has(k.key) ? `<span class="pill live pulse">Live</span>` : `<span class="pill idle">Ready</span>`;
+    return `<tr class="${k.enabled ? "" : "off"}">
+      <td><strong>${esc(k.label)}</strong></td>
+      <td><span class="mono copy" data-copy="${esc(k.key)}" title="Click to copy">${esc(k.key)}</span></td>
+      <td>${st}</td>
+      <td class="muted">${ago(k.last_used)}</td>
+      <td class="actions">
+        <button class="btn sm" data-setup="${esc(k.key)}">Copy setup</button>
+        <button class="btn sm" data-toggle="${esc(k.key)}">${k.enabled ? "Disable" : "Enable"}</button>
+        <button class="btn sm danger" data-del="${esc(k.key)}">Delete</button>
+      </td></tr>`;
+  }).join("") : `<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No keys yet. Add a performer above.</td></tr>`;
+}
+
+const EV = {
+  live: ["live", (k, l) => `<b>${l}</b> started streaming`],
+  ended: ["", (k, l) => `<b>${l}</b> stopped streaming`],
+  rejected: ["bad", k => `Rejected unknown key <span class="mono">${esc(k)}</span>`],
+  disabled: ["warn", (k, l) => `Blocked disabled key <b>${l}</b>`],
+  kicked: ["warn", (k, l) => `Kicked <b>${l}</b>`],
+  added: ["info", (k, l, e) => `Added key for <b>${esc(e.detail)}</b>`],
+  removed: ["info", (k, l, e) => `Deleted key for <b>${esc(e.detail)}</b>`],
+  changed: ["info", (k, l, e) => `${e.detail === "enabled" ? "Enabled" : "Disabled"} <b>${l}</b>`],
+};
+function renderEvents(list) {
+  const name = k => esc((keys.find(x => x.key === k) || {}).label || k);
+  $("#events").innerHTML = list.length ? list.slice(0, 150).map(e => {
+    const [cls, fn] = EV[e.kind] || ["", k => esc(e.kind + " " + k)];
+    return `<li><span class="d ${cls}"></span><span>${fn(e.key, name(e.key), e)}${e.count > 1 ? ` <span class="x">×${e.count}</span>` : ""}</span><time title="${new Date(e.t * 1000).toLocaleString()}">${clock(e.t)}</time></li>`;
+  }).join("") : `<li class="muted" style="display:block">No activity yet.</li>`;
+}
+
+async function pollStatus() {
+  try { status = await api("/api/status"); } catch { status = { online: false, streams: [] }; }
+  const seen = new Set();
+  for (const s of status.streams || []) {
+    if (!s.live) continue;
+    seen.add(s.name);
+    (hist[s.name] ||= []).push(s.bw_in / 1e6);
+    if (hist[s.name].length > HIST) hist[s.name].shift();
+  }
+  for (const n in hist) if (!seen.has(n)) delete hist[n];
+  renderStatus();
+}
+async function pollData() {
+  try {
+    [keys, settings] = await Promise.all([api("/api/keys"), api("/api/settings")]);
+    if (document.activeElement !== $("#serverurl")) $("#serverurl").value = settings.server_url || "";
+    renderKeys();
+    renderEvents(await api("/api/events"));
+  } catch {}
+}
+const refresh = () => Promise.all([pollStatus(), pollData()]);
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-kick],[data-toggle],[data-del],[data-setup],[data-copy]");
+  if (!b) return;
+  try {
+    if (b.dataset.copy) return copy(b.dataset.copy, "Key copied");
+    if (b.dataset.setup) {
+      const k = keys.find(x => x.key === b.dataset.setup);
+      return copy(`Hi ${k.label}, here are your streaming settings:\n\nServer: ${settings.server_url}\nStream key: ${k.key}\n\nRecommended: 1080p30 at 4–6 Mbps CBR (or 720p30 at 2.5–4 Mbps), keyframe interval 2 s, AAC audio 48 kHz 160 kbps. Please use a wired connection if you can.`, "Setup instructions copied");
+    }
+    if (b.dataset.kick) {
+      if (!confirm(`Disconnect ${b.dataset.kick}? Their encoder may reconnect automatically.`)) return;
+      await api("/api/kick", { key: b.dataset.kick }); toast("Kicked");
+    }
+    if (b.dataset.toggle) {
+      const k = keys.find(x => x.key === b.dataset.toggle);
+      if (k.enabled && !confirm(`Disable ${k.label}'s key? If they're live they'll be disconnected and can't reconnect until re-enabled.`)) return;
+      await api("/api/keys/update", { key: k.key, enabled: !k.enabled }); toast(k.enabled ? "Key disabled" : "Key enabled");
+    }
+    if (b.dataset.del) {
+      const k = keys.find(x => x.key === b.dataset.del);
+      if (!confirm(`Delete ${k.label}'s key (${k.key})? If they're live they'll be disconnected.`)) return;
+      await api("/api/keys/delete", { key: k.key }); toast("Key deleted");
+    }
+    refresh();
+  } catch (err) { toast(err.message); }
+});
+
+$("#addform").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    const k = await api("/api/keys", { label: $("#label").value, key: $("#custom").value });
+    $("#label").value = $("#custom").value = "";
+    toast(`Key created for ${k.label}: ${k.key}`);
+    refresh();
+  } catch (err) { toast(err.message); }
+});
+$("#saveurl").addEventListener("click", async () => {
+  try { await api("/api/settings", { server_url: $("#serverurl").value }); toast("Saved"); } catch (err) { toast(err.message); }
+});
+$("#kickall").addEventListener("click", async () => {
+  if (!confirm("Disconnect every live performer?")) return;
+  try { const r = await api("/api/kick-all", {}); toast(`Kicked ${r.kicked.length}`); refresh(); } catch (err) { toast(err.message); }
+});
+
+refresh();
+setInterval(pollStatus, 2000);
+setInterval(pollData, 4000);
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+services:
+  rtmp:
+    image: tiangolo/nginx-rtmp:latest
+    container_name: rtmp
+    restart: unless-stopped          # comes back after reboots / Docker restarts
+    ports:
+      - "1935:1935"                  # RTMP: performers + OBS
+      - "127.0.0.1:8090:8000"        # admin dashboard: this Mac only
+      - "127.0.0.1:8080:8080"        # raw stat page: this Mac only
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./stat.xsl:/etc/nginx/stat/stat.xsl:ro
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"              # stops logs growing forever
+        max-file: "3"
+
+  admin:
+    image: python:3.12-alpine
+    container_name: rtmp-admin
+    restart: unless-stopped
+    network_mode: "service:rtmp"     # shares rtmp's network: nginx <-> admin over 127.0.0.1
+    depends_on: [rtmp]
+    volumes:
+      - ./admin:/app:ro
+      - ./data:/data                 # keys.json, settings.json, events.jsonl
+    command: ["python", "-u", "/app/app.py"]
+    logging: *logging
